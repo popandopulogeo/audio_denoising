@@ -2,30 +2,6 @@ import os
 import json
 import shutil
 
-class TrainClock(object):
-    """ Clock object to track epoch and step during training
-    """
-    def __init__(self):
-        self.epoch = 0
-        self.minibatch = 0
-
-    def tick(self):
-        self.minibatch += 1
-
-    def tock(self):
-        self.epoch += 1
-        self.minibatch = 0
-
-    def save(self):
-        return {
-            'epoch': self.epoch,
-            'minibatch': self.minibatch,
-        }
-
-    def load(self, clock_dict):
-        self.epoch = clock_dict['epoch']
-        self.minibatch = clock_dict['minibatch']
-
 def save_args(args, save_dir):
     param_path = os.path.join(save_dir, 'params.json')
 

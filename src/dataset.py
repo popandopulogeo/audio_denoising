@@ -8,6 +8,7 @@ import numpy as np
 import torch
 from joblib import Parallel, delayed
 from torch.utils.data import Dataset
+from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm
 
 from tools import *
@@ -78,45 +79,41 @@ class AudioDataset(Dataset):
         # item[1]: data start
         # item[2]: data end
         # item[3]: audio_path
-        file_info_dict = self.files[item[0]]
+        item = self.items[index]
 
-        assert item[1]+self.config.duration <= float(file_info_dict['duration'])
-        start = int(item[1] * self.config.sr)
-        end = int(item[2] * self.config.sr)
+        start = int(item[1] * SR)
+        end = int(item[2] * SR)
 
-        try:
-            audio, _ = librosa.load(item[3], sr=self.config.sr)
-            audio = audio[start:end]
+        audio, _ = librosa.load(item[3], sr=self.config.sr)
+        audio = audio[start:end]
 
-            # compute mask
-            sid_mask = np.zeros(self.config.time_bins)    
-            sound = extrapolate_audio(np.abs(audio), self.config.time_bins)
-            sound = sound.reshape(self.config.time_bins, -1)
-            sid_mask = np.int_(np.mean(sound, axis=1) > self.config.mask_threshold)
+        # compute mask
+        sid_mask = np.zeros(self.config.time_bins)    
+        sound = extrapolate_audio(np.abs(audio), self.config.time_bins)
+        sound = sound.reshape(self.config.time_bins, -1)
+        sid_mask = np.int_(np.mean(sound, axis=1) > self.config.mask_threshold)
 
-            # read noise signal
-            noise = random.choice(self.noises)
-            snr = np.random.choice(self.config.SNRS, 1)[0]
-            mixed_sig, clean_sig, noise_sig = add_noise_to_audio(audio, noise, snr)
+        # read noise signal
+        noise = random.choice(self.noises)
+        snr = np.random.choice(self.config.SNRS, 1)[0]
+        mixed_sig, clean_sig, noise_sig = add_noise_to_audio(audio, noise, snr)
 
-            # stft
-            mixed_sig_stft = fast_stft(mixed_sig, n_fft=self.config.n_fft, hop_length=self.config.hop_length, win_length=self.config.win_length)
-            clean_sig_stft = fast_stft(clean_sig, n_fft=self.config.n_fft, hop_length=self.config.hop_length, win_length=self.config.win_length)
-            noise_sig_stft = fast_stft(noise_sig, n_fft=self.config.n_fft, hop_length=self.config.hop_length, win_length=self.config.win_length)
-            icrm = fast_cRM_sigmoid(clean_sig_stft, mixed_sig_stft)
+        # stft
+        mixed_sig_stft = fast_stft(mixed_sig, n_fft=self.config.n_fft, hop_length=self.config.hop_length, win_length=self.config.win_length)
+        clean_sig_stft = fast_stft(clean_sig, n_fft=self.config.n_fft, hop_length=self.config.hop_length, win_length=self.config.win_length)
+        noise_sig_stft = fast_stft(noise_sig, n_fft=self.config.n_fft, hop_length=self.config.hop_length, win_length=self.config.win_length)
+        icrm = fast_cRM_sigmoid(clean_sig_stft, mixed_sig_stft)
 
-            #to torch
-            mixed_sig_stft = torch.tensor(mixed_sig_stft.transpose((2, 0, 1)), dtype=torch.float32)
-            clean_sig_stft = torch.tensor(clean_sig_stft.transpose((2, 0, 1)), dtype=torch.float32)
-            noise_sig_stft = torch.tensor(noise_sig_stft.transpose((2, 0, 1)), dtype=torch.float32)
-            noise_mask = torch.tensor(icrm.transpose((2, 0, 1)), dtype=torch.float32)
-            sid_mask = torch.tensor(sid_mask, dtype=torch.float32)
+        #to torch
+        mixed_sig_stft = torch.tensor(mixed_sig_stft.transpose((2, 0, 1)), dtype=torch.float32)
+        clean_sig_stft = torch.tensor(clean_sig_stft.transpose((2, 0, 1)), dtype=torch.float32)
+        noise_sig_stft = torch.tensor(noise_sig_stft.transpose((2, 0, 1)), dtype=torch.float32)
+        noise_mask = torch.tensor(icrm.transpose((2, 0, 1)), dtype=torch.float32)
+        sid_mask = torch.tensor(sid_mask, dtype=torch.float32)
 
-        except Exception as e:
-            print(e)
-            raise RuntimeError
 
         return {
+            "audio": audio,
             "mixed": mixed_sig_stft,
             "clean": clean_sig_stft,
             "noise": noise_sig_stft,
@@ -125,3 +122,27 @@ class AudioDataset(Dataset):
 
     def __len__(self):
         return len(self.items)
+
+    @staticmethod
+    def get_dataloaders(config):
+        train_dataset = AudioDataset(PHASE_TRAINING, self.config)
+        train_loader = DataLoader(train_dataset, 
+                                  batch_size=self.config.batch_size, 
+                                  shuffle=True, 
+                                  pin_memory=True,
+                                  sampler=DistributedSampler(train_dataset,
+                                                             num_replicas=int(os.environ["WORLD_SIZE"]),
+                                                             rank=int(os.environ["SLURM_PROCID"])),
+                                  num_workers=int(os.environ["SLURM_CPUS_PER_TASK"]) 
+                                  )
+
+        test_dataset = AudioDataset(PHASE_TESTING, self.config)
+        test_loader = DataLoader(test_dataset, 
+                                 batch_size=self.config.batch_size, 
+                                 pin_memory=True, 
+                                 sampler=DistributedSampler(test_loader,
+                                                            num_replicas=int(os.environ["WORLD_SIZE"]),
+                                                            rank=int(os.environ["SLURM_PROCID"])),
+                                 num_workers=int(os.environ["SLURM_CPUS_PER_TASK"]))
+
+        return train_loader, test_loader

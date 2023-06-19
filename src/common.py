@@ -11,7 +11,6 @@ class Config(object):
     """
     def __init__(self):
         # general
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         self.exp_name = "test"
 
@@ -48,15 +47,9 @@ class Config(object):
         self.time_bins = 203
 
         # training configuration
-        self.nr_epochs = 50
+        self.n_epochs = 150
         self.batch_size = 8 
-        self.num_workers = 8 
-        self.lr = 1e-3 
-        self.lr_step_size = 15
-        self.lr_decay = 0.999
-
-        self.save_frequency = 1
-        self.val_frequency = 10
+        self.base_lr = 1e-4 
 
 
     def __repr__(self):
