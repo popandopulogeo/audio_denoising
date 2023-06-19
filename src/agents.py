@@ -16,7 +16,7 @@ def ddp_setup(world_size, rank):
 def ddp_destroy():
     dist.destroy_process_group()
 
-class TrainAgent(ABC):
+class TrainAgent(abc.ABC):
     def __init__(self, local_rank, components, optimizers, criterions, schedulers, logger, config):
         self.local_rank = local_rank
         self.global_rank = int(os.environ["SLURM_PROCID"])
@@ -75,7 +75,7 @@ class TrainAgent(ABC):
 
                 self.current_epoch += 1
 
-    @abstractmethod            
+    @abc.abstractmethod            
     def run_epoch(self):
         pass
 
