@@ -70,7 +70,7 @@ class TrainAgent(ABC):
 
                 cur_metric = self.records["PESQ"].item() / self.n_samples.item()
                 if cur_metric > self.best_metric:
-                    self._save_snapshot("BEST.PTH")
+                    self.save_snapshot("BEST.PTH")
                     self.best_metric = cur_metric
 
                 self.current_epoch += 1
@@ -107,7 +107,7 @@ class TrainAgent(ABC):
             self.records[key] += record[key]
         self.n_samples += n_samples
 
-    def _reduce_records(self) -> None:
+    def reduce_records(self) -> None:
         for key in self.records.keys():
             self.records[key] = self.records[key].to(self.local_rank)
             dist.reduce(self.records[key], dst=0)
@@ -115,7 +115,7 @@ class TrainAgent(ABC):
         self.n_samples = self.n_samples.to(self.local_rank)
         dist.reduce(self.n_samples, dst=0)
 
-    def _log_scalars(self) -> None:
+    def log_scalars(self) -> None:
         for key in self.records.keys(): 
             self.logger.log({f'metrics/{self.stage}/{key}' : torch.nan_to_num(self.records[key] / self.n_samples, -1).item()})
 
